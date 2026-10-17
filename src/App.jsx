@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { 
   Hash, Volume2, Mic, MicOff, Video, VideoOff, 
-  Monitor, Send, Users, Settings, Plus 
+  Monitor, MonitorOff, Send, Users, Settings, Plus 
 } from 'lucide-react';
 
 const supabaseUrl = 'https://qowdffsjkqewqtmdyzzg.supabase.co';
@@ -13,9 +13,11 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [username, setUsername] = useState('Utilizador' + Math.floor(Math.random() * 1000));
-  const [activeChannel, setActiveChannel] = useState('geral'); // 'geral' ou 'reuniao'
+  const [activeChannel, setActiveChannel] = useState('geral');
   const [isVideoOn, setIsVideoOn] = useState(false);
   const [isMicOn, setIsMicOn] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  
   const messagesEndRef = useRef(null);
   const videoRef = useRef(null);
 
@@ -24,7 +26,6 @@ export default function App() {
       const { data } = await supabase.from('messages').select('*').order('created_at', { ascending: true }).limit(50);
       if (data) setMessages(data);
     };
-
     fetchMessages();
 
     const channel = supabase
@@ -41,21 +42,56 @@ export default function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Lógica da Câmara
+  // Lógica da Câmara Tradicional
   useEffect(() => {
-    if (activeChannel === 'reuniao' && isVideoOn) {
+    if (activeChannel === 'reuniao' && isVideoOn && !isScreenSharing) {
       navigator.mediaDevices.getUserMedia({ video: true, audio: isMicOn })
         .then(stream => {
           if (videoRef.current) videoRef.current.srcObject = stream;
         })
-        .catch(err => console.error("Erro ao aceder à câmara", err));
-    } else {
+        .catch(err => {
+          console.error("Erro ao aceder à câmara", err);
+          setIsVideoOn(false);
+          alert("O browser bloqueou o acesso à câmara. Por favor, permita o acesso na barra de endereço (ícone do cadeado).");
+        });
+    } else if (!isScreenSharing) {
       if (videoRef.current && videoRef.current.srcObject) {
         videoRef.current.srcObject.getTracks().forEach(track => track.stop());
         videoRef.current.srcObject = null;
       }
     }
-  }, [activeChannel, isVideoOn, isMicOn]);
+  }, [activeChannel, isVideoOn, isMicOn, isScreenSharing]);
+
+  // Lógica para Partilhar Ecrã com Áudio
+  const toggleScreenShare = async () => {
+    if (!isScreenSharing) {
+      try {
+        // Pede acesso ao ecrã e ao áudio do sistema
+        const stream = await navigator.mediaDevices.getDisplayMedia({ 
+          video: true, 
+          audio: true 
+        });
+        
+        if (videoRef.current) videoRef.current.srcObject = stream;
+        setIsScreenSharing(true);
+        setIsVideoOn(false); // Desliga a câmara normal se for ligar o ecrã
+
+        // Quando o utilizador clica em "Parar partilha" na barra do browser
+        stream.getVideoTracks()[0].onended = () => {
+          setIsScreenSharing(false);
+          if (videoRef.current) videoRef.current.srcObject = null;
+        };
+      } catch (err) {
+        console.error("Erro ao partilhar ecrã:", err);
+      }
+    } else {
+      if (videoRef.current && videoRef.current.srcObject) {
+        videoRef.current.srcObject.getTracks().forEach(track => track.stop());
+        videoRef.current.srcObject = null;
+      }
+      setIsScreenSharing(false);
+    }
+  };
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
@@ -107,13 +143,11 @@ export default function App() {
       <div className="flex-1 flex flex-col bg-[#313338] min-w-0">
         {activeChannel === 'geral' ? (
           <>
-            {/* Cabeçalho Geral */}
             <div className="h-12 border-b border-[#1f2023] flex items-center px-4 gap-2 shadow-sm">
               <Hash size={24} className="text-gray-400" />
               <span className="font-semibold">geral</span>
             </div>
 
-            {/* Chat */}
             <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
               {messages.map((msg) => (
                 <div key={msg.id} className="flex gap-4 hover:bg-[#2e3035] p-2 rounded -mx-2">
@@ -127,7 +161,6 @@ export default function App() {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input de Mensagem */}
             <div className="p-4">
               <form onSubmit={handleSendMessage} className="bg-[#383a40] rounded-lg flex items-center px-4 py-2 gap-4">
                 <Plus size={24} className="text-gray-400" />
@@ -144,40 +177,55 @@ export default function App() {
           </>
         ) : (
           <>
-            {/* Cabeçalho Reunião */}
             <div className="h-12 border-b border-[#1f2023] flex items-center px-4 gap-2 shadow-sm">
               <Volume2 size={24} className="text-gray-400" />
               <span className="font-semibold">Reunião</span>
             </div>
 
-            {/* Área de Vídeo */}
             <div className="flex-1 p-6 flex flex-col items-center justify-center gap-6">
               <div className="w-full max-w-3xl aspect-video bg-[#1e1f22] rounded-xl overflow-hidden flex items-center justify-center relative shadow-lg">
-                {isVideoOn ? (
-                  <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+                {(isVideoOn || isScreenSharing) ? (
+                  <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-contain" />
                 ) : (
                   <div className="flex flex-col items-center text-gray-500 gap-4">
                     <div className="w-24 h-24 rounded-full bg-[#2b2d31] flex items-center justify-center">
                       <Users size={48} />
                     </div>
-                    <p>A câmara está desligada</p>
+                    <p>A câmara e o ecrã estão desligados</p>
                   </div>
                 )}
               </div>
 
               {/* Controlos da Reunião */}
               <div className="flex gap-4">
+                {/* Botão Microfone */}
                 <button 
                   onClick={() => setIsMicOn(!isMicOn)}
                   className={`p-4 rounded-full flex items-center justify-center transition-all ${isMicOn ? 'bg-[#2b2d31] hover:bg-[#35373c] text-white' : 'bg-red-500 hover:bg-red-600 text-white'}`}
+                  title="Ligar/Desligar Microfone"
                 >
                   {isMicOn ? <Mic size={24} /> : <MicOff size={24} />}
                 </button>
+
+                {/* Botão Câmara */}
                 <button 
-                  onClick={() => setIsVideoOn(!isVideoOn)}
+                  onClick={() => {
+                    if (isScreenSharing) setIsScreenSharing(false);
+                    setIsVideoOn(!isVideoOn);
+                  }}
                   className={`p-4 rounded-full flex items-center justify-center transition-all ${isVideoOn ? 'bg-[#2b2d31] hover:bg-[#35373c] text-white' : 'bg-red-500 hover:bg-red-600 text-white'}`}
+                  title="Ligar/Desligar Câmara"
                 >
                   {isVideoOn ? <Video size={24} /> : <VideoOff size={24} />}
+                </button>
+
+                {/* Botão Partilhar Ecrã (NOVO) */}
+                <button 
+                  onClick={toggleScreenShare}
+                  className={`p-4 rounded-full flex items-center justify-center transition-all ${isScreenSharing ? 'bg-[#2b2d31] hover:bg-[#35373c] text-white' : 'bg-[#5865F2] hover:bg-[#4752C4] text-white'}`}
+                  title="Partilhar Ecrã"
+                >
+                  {isScreenSharing ? <MonitorOff size={24} /> : <Monitor size={24} />}
                 </button>
               </div>
             </div>
